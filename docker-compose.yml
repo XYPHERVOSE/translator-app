@@ -1,0 +1,82 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: translator_db
+    environment:
+      POSTGRES_USER: translator_user
+      POSTGRES_PASSWORD: translator_pass_secure
+      POSTGRES_DB: translator_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U translator_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Python FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: translator_backend
+    environment:
+      DATABASE_URL: postgresql://translator_user:translator_pass_secure@postgres:5432/translator_db
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-demo}
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-hf-demo}
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8080
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: translator_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      REACT_APP_API_URL: http://localhost:8000/api
+      REACT_APP_WS_URL: ws://localhost:8000/ws
+    command: npm start
+    depends_on:
+      - backend
+
+  # Redis Cache (Optional)
+  redis:
+    image: redis:7-alpine
+    container_name: translator_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: translator_network
